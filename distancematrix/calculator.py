@@ -109,30 +109,29 @@ class AbstractCalculator(ABC):
 
         start_time = time.time()
 
-        with interrupt_catcher() as is_interrupted:
-            while current_column < upto and not is_interrupted():
-                for generator_id in generators_needed_ids:  # todo: parallel
-                    generator = generators[generator_id]
-                    column_dists[generator_id, :] = generator.calc_column(current_column)
+        while current_column < upto:
+            for generator_id in generators_needed_ids:  # todo: parallel
+                generator = generators[generator_id]
+                column_dists[generator_id, :] = generator.calc_column(current_column)
 
-                if self.trivial_match_buffer >= 0:
-                    trivial_match_start = max(0, current_column - self.trivial_match_buffer)
-                    trivial_match_end = current_column + self.trivial_match_buffer + 1
-                    column_dists[:, trivial_match_start : trivial_match_end] = np.inf
+            if self.trivial_match_buffer >= 0:
+                trivial_match_start = max(0, current_column - self.trivial_match_buffer)
+                trivial_match_end = current_column + self.trivial_match_buffer + 1
+                column_dists[:, trivial_match_start : trivial_match_end] = np.inf
 
-                for consumer, generator_ids in self._consumers.items():  # todo: parallel
-                    consumer.process_column(current_column, column_dists[generator_ids, :])
+            for consumer, generator_ids in self._consumers.items():  # todo: parallel
+                consumer.process_column(current_column, column_dists[generator_ids, :])
 
-                self._last_column_calculated = max(current_column, self._last_column_calculated)
-                current_column += 1
+            self._last_column_calculated = max(current_column, self._last_column_calculated)
+            current_column += 1
 
-                if print_progress:
-                    columns_calculated = current_column - start
-                    columns_remaining = upto + 1 - current_column
-                    print("\r{0:5.3f}% {1:10.1f} sec".format(
-                        columns_calculated / (upto + 1 - start) * 100,
-                        (time.time() - start_time) / columns_calculated * columns_remaining
-                    ), end="")
+            if print_progress:
+                columns_calculated = current_column - start
+                columns_remaining = upto + 1 - current_column
+                print("\r{0:5.3f}% {1:10.1f} sec".format(
+                    columns_calculated / (upto + 1 - start) * 100,
+                    (time.time() - start_time) / columns_calculated * columns_remaining
+                ), end="")
 
     @property
     def num_dist_matrix_values(self):
@@ -239,36 +238,35 @@ class AnytimeCalculator(AbstractCalculator):
 
         values_needed = _ratio_to_int(partial, self._diagonal_values_total, self._diagonal_values_total)
 
-        with interrupt_catcher() as is_interrupted:
-            while self._diagonal_values_calculated < values_needed and not is_interrupted():
-                start_time = time.time()
+        while self._diagonal_values_calculated < values_needed:
+            start_time = time.time()
 
-                # Diagonal: 0 is the main diagonal, 1 is one above the main diagonal, etc...
-                diagonal = self._diagonal_calc_order[self._diagonal_calc_list_next_index]
-                diagonal_length = diag_length(self.num_query_subseq, self.num_series_subseq, diagonal)
-                diagonal_values = diag_dists[:, :diagonal_length]
+            # Diagonal: 0 is the main diagonal, 1 is one above the main diagonal, etc...
+            diagonal = self._diagonal_calc_order[self._diagonal_calc_list_next_index]
+            diagonal_length = diag_length(self.num_query_subseq, self.num_series_subseq, diagonal)
+            diagonal_values = diag_dists[:, :diagonal_length]
 
-                for generator_id in generators_needed_ids:  # todo: parallel
-                    generator = generators[generator_id]
-                    diagonal_values[generator_id, :] = generator.calc_diagonal(diagonal)
+            for generator_id in generators_needed_ids:  # todo: parallel
+                generator = generators[generator_id]
+                diagonal_values[generator_id, :] = generator.calc_diagonal(diagonal)
 
-                for consumer, generator_ids in self._consumers.items():  # todo: parallel
-                    values_to_consume = diagonal_values[generator_ids, :]
-                    consumer.process_diagonal(diagonal, values_to_consume)
-                    if self._self_join:
-                        consumer.process_diagonal(-diagonal, values_to_consume)
+            for consumer, generator_ids in self._consumers.items():  # todo: parallel
+                values_to_consume = diagonal_values[generator_ids, :]
+                consumer.process_diagonal(diagonal, values_to_consume)
+                if self._self_join:
+                    consumer.process_diagonal(-diagonal, values_to_consume)
 
-                self._diagonal_values_calculated += int(diagonal_length)  # numpy.int32 to int
-                self._diagonal_calc_list_next_index += 1
+            self._diagonal_values_calculated += int(diagonal_length)  # numpy.int32 to int
+            self._diagonal_calc_list_next_index += 1
 
-                self._diagonal_calc_time += time.time() - start_time
-                if print_progress:
-                    local_progress = self._diagonal_values_calculated / values_needed
-                    global_progress = self._diagonal_values_calculated / self._diagonal_values_total
-                    avg_time_per_value = self._diagonal_calc_time / self._diagonal_values_calculated
-                    time_left = avg_time_per_value * (values_needed - self._diagonal_values_calculated)
-                    print("\r{0:5.3f}% {1:10.1f} sec ({2:5.3f}% total)".
-                          format(local_progress * 100, time_left, global_progress * 100), end="")
+            self._diagonal_calc_time += time.time() - start_time
+            if print_progress:
+                local_progress = self._diagonal_values_calculated / values_needed
+                global_progress = self._diagonal_values_calculated / self._diagonal_values_total
+                avg_time_per_value = self._diagonal_calc_time / self._diagonal_values_calculated
+                time_left = avg_time_per_value * (values_needed - self._diagonal_values_calculated)
+                print("\r{0:5.3f}% {1:10.1f} sec ({2:5.3f}% total)".
+                        format(local_progress * 100, time_left, global_progress * 100), end="")
 
 
 class StreamingCalculator(AbstractCalculator):
